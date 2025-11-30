@@ -39,7 +39,12 @@ def get_exif_data(image_path):
         return None
 
 
-def get_iptc_people(image_path):
+def get_iptc_people(image_path, cache=None):
+    cache_key = str(image_path)
+
+    if cache and cache_key in cache:
+        return cache[cache_key]
+
     try:
         from PIL import Image
         from PIL.IptcImagePlugin import getiptcinfo
@@ -82,9 +87,16 @@ def get_iptc_people(image_path):
 
         if people:
             print(f"Found people in {image_path}: {people}")
-        return people if people else None
+
+        result = people if people else None
+        if cache is not None:
+            cache[cache_key] = result
+
+        return result
     except Exception as e:
         print(f"Error reading IPTC from {image_path}: {e}")
+        if cache is not None:
+            cache[cache_key] = None
         return None
 
 
@@ -140,6 +152,24 @@ def save_geocache(cache, cache_file='.geocache.json'):
             json.dump(cache, f, indent=2)
     except Exception as e:
         print(f"Error saving geocache: {e}")
+
+
+def load_people_cache(cache_file='.peoplecache.json'):
+    try:
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading people cache: {e}")
+    return {}
+
+
+def save_people_cache(cache, cache_file='.peoplecache.json'):
+    try:
+        with open(cache_file, 'w') as f:
+            json.dump(cache, f, indent=2)
+    except Exception as e:
+        print(f"Error saving people cache: {e}")
 
 
 def get_location_name(lat, lon, cache=None):
@@ -233,7 +263,7 @@ def get_image_date(exif_data):
     return None
 
 
-def create_pdf(year_groups, output_path, geocache):
+def create_pdf(year_groups, output_path, geocache, peoplecache):
     doc = SimpleDocTemplate(output_path, pagesize=letter,
                           topMargin=0.5*inch, bottomMargin=0.5*inch,
                           leftMargin=0.5*inch, rightMargin=0.5*inch)
@@ -356,12 +386,14 @@ def create_pdf(year_groups, output_path, geocache):
 
     doc.build(story)
     save_geocache(geocache)
+    save_people_cache(peoplecache)
     print(f"\nPDF created successfully: {output_path}")
 
 
 def process_images(input_path, output_path, threshold):
     photos = []
     geocache = load_geocache()
+    peoplecache = load_people_cache()
 
     input_path = Path(input_path)
 
@@ -377,6 +409,7 @@ def process_images(input_path, output_path, threshold):
 
     print(f"Found {len(image_files)} image(s) to process...")
     print(f"Loaded {len(geocache)} cached location(s)")
+    print(f"Loaded {len(peoplecache)} cached people tag(s)")
 
     for image_path in image_files:
         exif_data = get_exif_data(str(image_path))
@@ -385,7 +418,7 @@ def process_images(input_path, output_path, threshold):
 
         if coordinates:
             photo_date = get_image_date(exif_data)
-            people = get_iptc_people(str(image_path))
+            people = get_iptc_people(str(image_path), peoplecache)
             photos.append({
                 'path': str(image_path),
                 'coordinates': coordinates,
@@ -423,7 +456,7 @@ def process_images(input_path, output_path, threshold):
     total_clusters = sum(len(clusters) for clusters in year_groups.values())
     print(f"Grouped into {len(year_groups)} year(s) and {total_clusters} location(s)")
 
-    create_pdf(year_groups, output_path, geocache)
+    create_pdf(year_groups, output_path, geocache, peoplecache)
 
 
 def main():
