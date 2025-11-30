@@ -41,33 +41,47 @@ def get_exif_data(image_path):
 
 def get_iptc_people(image_path):
     try:
-        iptc = IPTCInfo(image_path, force=True)
+        from PIL import Image
+        from PIL.IptcImagePlugin import getiptcinfo
+
+        image = Image.open(image_path)
+        iptc_data = getiptcinfo(image)
         people = []
 
-        # Try to get data from the people/persons field (often used in photo software)
-        for attr in ['_data', 'data']:
-            if hasattr(iptc, attr):
-                data = getattr(iptc, attr)
-                # IPTC tag 2:025 is often used for keywords/people
-                if isinstance(data, dict) and (2, 25) in data:
-                    keywords = data[(2, 25)]
-                    if isinstance(keywords, list):
-                        for kw in keywords:
-                            if isinstance(kw, bytes):
-                                people.append(kw.decode('utf-8', errors='ignore'))
-                            else:
-                                people.append(str(kw))
-                    elif isinstance(keywords, bytes):
-                        people.append(keywords.decode('utf-8', errors='ignore'))
+        if iptc_data:
+            # IPTC tag (2, 25) is Keywords
+            if (2, 25) in iptc_data:
+                keywords = iptc_data[(2, 25)]
+                if isinstance(keywords, bytes):
+                    keywords = [keywords]
+                for kw in keywords:
+                    if isinstance(kw, bytes):
+                        people.append(kw.decode('utf-8', errors='ignore'))
+                    else:
+                        people.append(str(kw))
 
-        # Also try keywords attribute
-        if hasattr(iptc, 'keywords') and iptc.keywords:
-            for keyword in iptc.keywords:
-                kw_str = keyword.decode('utf-8', errors='ignore') if isinstance(keyword, bytes) else str(keyword)
-                if kw_str not in people:
-                    people.append(kw_str)
+            # IPTC tag (2, 80) is By-line (creator/person)
+            if (2, 80) in iptc_data:
+                byline = iptc_data[(2, 80)]
+                if isinstance(byline, bytes):
+                    people.append(byline.decode('utf-8', errors='ignore'))
+                else:
+                    people.append(str(byline))
 
-        print(f"Found people in {image_path}: {people}")
+        # Fallback to IPTCInfo library
+        if not people:
+            try:
+                iptc = IPTCInfo(image_path, force=True)
+                if hasattr(iptc, 'keywords') and iptc.keywords:
+                    for keyword in iptc.keywords:
+                        kw_str = keyword.decode('utf-8', errors='ignore') if isinstance(keyword, bytes) else str(keyword)
+                        if kw_str not in people:
+                            people.append(kw_str)
+            except:
+                pass
+
+        if people:
+            print(f"Found people in {image_path}: {people}")
         return people if people else None
     except Exception as e:
         print(f"Error reading IPTC from {image_path}: {e}")
