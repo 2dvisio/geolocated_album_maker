@@ -1,0 +1,1 @@
+geolocated_album_maker
