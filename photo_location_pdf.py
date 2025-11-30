@@ -44,22 +44,33 @@ def get_iptc_people(image_path):
         iptc = IPTCInfo(image_path, force=True)
         people = []
 
+        # Try to get data from the people/persons field (often used in photo software)
+        for attr in ['_data', 'data']:
+            if hasattr(iptc, attr):
+                data = getattr(iptc, attr)
+                # IPTC tag 2:025 is often used for keywords/people
+                if isinstance(data, dict) and (2, 25) in data:
+                    keywords = data[(2, 25)]
+                    if isinstance(keywords, list):
+                        for kw in keywords:
+                            if isinstance(kw, bytes):
+                                people.append(kw.decode('utf-8', errors='ignore'))
+                            else:
+                                people.append(str(kw))
+                    elif isinstance(keywords, bytes):
+                        people.append(keywords.decode('utf-8', errors='ignore'))
+
+        # Also try keywords attribute
         if hasattr(iptc, 'keywords') and iptc.keywords:
             for keyword in iptc.keywords:
-                if isinstance(keyword, bytes):
-                    people.append(keyword.decode('utf-8', errors='ignore'))
-                else:
-                    people.append(str(keyword))
+                kw_str = keyword.decode('utf-8', errors='ignore') if isinstance(keyword, bytes) else str(keyword)
+                if kw_str not in people:
+                    people.append(kw_str)
 
-        if hasattr(iptc, 'supplementalCategories') and iptc.supplementalCategories:
-            for cat in iptc.supplementalCategories:
-                if isinstance(cat, bytes):
-                    people.append(cat.decode('utf-8', errors='ignore'))
-                else:
-                    people.append(str(cat))
-
+        print(f"Found people in {image_path}: {people}")
         return people if people else None
     except Exception as e:
+        print(f"Error reading IPTC from {image_path}: {e}")
         return None
 
 
