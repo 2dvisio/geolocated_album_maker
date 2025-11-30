@@ -249,57 +249,57 @@ def create_pdf(year_groups, output_path, geocache):
             story.append(Paragraph(f"{len(cluster['photos'])} photo(s)", styles['Normal']))
             story.append(Spacer(1, 0.15*inch))
 
-        photos = cluster['photos']
-        img_size = 2.3 * inch
+            photos = cluster['photos']
+            img_size = 2.3 * inch
 
-        grid_data = []
-        current_row = []
+            grid_data = []
+            current_row = []
 
-        for idx, photo in enumerate(photos):
-            try:
-                img = RLImage(photo['path'])
-                aspect = img.imageWidth / img.imageHeight
+            for idx, photo in enumerate(photos):
+                try:
+                    img = RLImage(photo['path'])
+                    aspect = img.imageWidth / img.imageHeight
 
-                if aspect > 1:
-                    img.drawWidth = img_size
-                    img.drawHeight = img_size / aspect
-                else:
-                    img.drawHeight = img_size
-                    img.drawWidth = img_size * aspect
+                    if aspect > 1:
+                        img.drawWidth = img_size
+                        img.drawHeight = img_size / aspect
+                    else:
+                        img.drawHeight = img_size
+                        img.drawWidth = img_size * aspect
 
-                caption_text = ""
-                if photo['date']:
-                    caption_text = photo['date'].strftime('%b %d, %Y')
+                    caption_text = ""
+                    if photo['date']:
+                        caption_text = photo['date'].strftime('%b %d, %Y')
 
-                cell_content = [img, Paragraph(caption_text, caption_style)]
-                current_row.append(cell_content)
+                    cell_content = [img, Paragraph(caption_text, caption_style)]
+                    current_row.append(cell_content)
 
-                if len(current_row) == 3:
-                    grid_data.append(current_row)
-                    current_row = []
+                    if len(current_row) == 3:
+                        grid_data.append(current_row)
+                        current_row = []
 
-            except Exception as e:
-                print(f"Error adding image {photo['path']}: {e}")
+                except Exception as e:
+                    print(f"Error adding image {photo['path']}: {e}")
 
-        if current_row:
-            while len(current_row) < 3:
-                current_row.append("")
-            grid_data.append(current_row)
+            if current_row:
+                while len(current_row) < 3:
+                    current_row.append("")
+                grid_data.append(current_row)
 
-        if grid_data:
-            table = Table(grid_data, colWidths=[2.5*inch, 2.5*inch, 2.5*inch])
-            table.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 5),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
-                ('TOPPADDING', (0, 0), (-1, -1), 5),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-            ]))
-            story.append(table)
+            if grid_data:
+                table = Table(grid_data, colWidths=[2.5*inch, 2.5*inch, 2.5*inch])
+                table.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ]))
+                story.append(table)
 
-            if i < len(clusters):
-                story.append(Spacer(1, 0.3*inch))
+                if i < len(clusters):
+                    story.append(Spacer(1, 0.3*inch))
 
     doc.build(story)
     save_geocache(geocache)
