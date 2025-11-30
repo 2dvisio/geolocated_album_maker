@@ -7,12 +7,16 @@ from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, PageBreak, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
+from reportlab.lib import colors
 from collections import defaultdict
 from datetime import datetime
 import argparse
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+import time
 
 
 def get_exif_data(image_path):
@@ -70,7 +74,37 @@ def get_coordinates(gps_info):
 
 
 def get_location_name(lat, lon):
-    return f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}, {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
+    try:
+        geolocator = Nominatim(user_agent="photo_location_pdf")
+        time.sleep(1)
+        location = geolocator.reverse(f"{lat}, {lon}", language='en', timeout=10)
+
+        if location and location.raw.get('address'):
+            address = location.raw['address']
+
+            city = (address.get('city') or
+                   address.get('town') or
+                   address.get('village') or
+                   address.get('municipality') or
+                   address.get('county'))
+
+            country = address.get('country', '')
+
+            if city and country:
+                return f"{city}, {country}"
+            elif city:
+                return city
+            elif country:
+                return country
+
+        return f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}, {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
+
+    except (GeocoderTimedOut, GeocoderServiceError) as e:
+        print(f"Geocoding error: {e}. Using coordinates instead.")
+        return f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}, {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
+    except Exception as e:
+        print(f"Unexpected error in geocoding: {e}")
+        return f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}, {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
 
 
 def cluster_locations(photos, threshold=0.01):
@@ -141,10 +175,9 @@ def create_pdf(clusters, output_path):
     caption_style = ParagraphStyle(
         'Caption',
         parent=styles['Normal'],
-        fontSize=9,
+        fontSize=7,
         textColor='#7f8c8d',
-        alignment=TA_CENTER,
-        spaceAfter=20
+        alignment=TA_CENTER
     )
 
     story.append(Paragraph("Photo Album by Location", title_style))
@@ -153,42 +186,61 @@ def create_pdf(clusters, output_path):
 
     for i, cluster in enumerate(clusters, 1):
         lat, lon = cluster['center']
+        print(f"\nLooking up location for cluster {i}...")
         location_name = get_location_name(lat, lon)
 
-        story.append(Paragraph(f"Location {i}: {location_name}", location_style))
+        story.append(Paragraph(f"{location_name}", location_style))
         story.append(Paragraph(f"{len(cluster['photos'])} photo(s)", styles['Normal']))
-        story.append(Spacer(1, 0.2*inch))
+        story.append(Spacer(1, 0.15*inch))
 
-        for photo in cluster['photos']:
+        photos = cluster['photos']
+        img_size = 2.3 * inch
+
+        grid_data = []
+        current_row = []
+
+        for idx, photo in enumerate(photos):
             try:
                 img = RLImage(photo['path'])
-
-                available_width = 7 * inch
-                available_height = 5 * inch
-
                 aspect = img.imageWidth / img.imageHeight
 
-                if aspect > available_width / available_height:
-                    img_width = available_width
-                    img_height = img_width / aspect
+                if aspect > 1:
+                    img.drawWidth = img_size
+                    img.drawHeight = img_size / aspect
                 else:
-                    img_height = available_height
-                    img_width = img_height * aspect
+                    img.drawHeight = img_size
+                    img.drawWidth = img_size * aspect
 
-                img.drawWidth = img_width
-                img.drawHeight = img_height
-
-                story.append(img)
-
-                caption_text = Path(photo['path']).name
+                caption_text = ""
                 if photo['date']:
-                    caption_text += f" - {photo['date'].strftime('%B %d, %Y %I:%M %p')}"
+                    caption_text = photo['date'].strftime('%b %d, %Y')
 
-                story.append(Paragraph(caption_text, caption_style))
-                story.append(Spacer(1, 0.2*inch))
+                cell_content = [img, Paragraph(caption_text, caption_style)]
+                current_row.append(cell_content)
+
+                if len(current_row) == 3:
+                    grid_data.append(current_row)
+                    current_row = []
 
             except Exception as e:
                 print(f"Error adding image {photo['path']}: {e}")
+
+        if current_row:
+            while len(current_row) < 3:
+                current_row.append("")
+            grid_data.append(current_row)
+
+        if grid_data:
+            table = Table(grid_data, colWidths=[2.5*inch, 2.5*inch, 2.5*inch])
+            table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            story.append(table)
 
         if i < len(clusters):
             story.append(PageBreak())
