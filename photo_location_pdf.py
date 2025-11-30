@@ -450,7 +450,8 @@ def process_images(input_path, output_path, threshold):
             lat, lon = coordinates
             cache_key = f"{lat:.4f},{lon:.4f}"
             location_str = geocache.get(cache_key, f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}")
-            print(f"✓ {image_path.name} - GPS: {location_str}")
+            people_str = f" | People: {', '.join(people)}" if people else " | No people tags"
+            print(f"✓ {image_path.name} - GPS: {location_str}{people_str}")
         else:
             print(f"✗ {image_path.name} - No GPS data found")
 
