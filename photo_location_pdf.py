@@ -17,6 +17,7 @@ import argparse
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 import time
+import json
 
 
 def get_exif_data(image_path):
@@ -73,12 +74,36 @@ def get_coordinates(gps_info):
         return None
 
 
-def get_location_name(lat, lon):
+def load_geocache(cache_file='.geocache.json'):
+    try:
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading geocache: {e}")
+    return {}
+
+
+def save_geocache(cache, cache_file='.geocache.json'):
+    try:
+        with open(cache_file, 'w') as f:
+            json.dump(cache, f, indent=2)
+    except Exception as e:
+        print(f"Error saving geocache: {e}")
+
+
+def get_location_name(lat, lon, cache=None):
+    cache_key = f"{lat:.4f},{lon:.4f}"
+
+    if cache and cache_key in cache:
+        return cache[cache_key]
+
     try:
         geolocator = Nominatim(user_agent="photo_location_pdf")
         time.sleep(1)
         location = geolocator.reverse(f"{lat}, {lon}", language='en', timeout=10)
 
+        location_name = None
         if location and location.raw.get('address'):
             address = location.raw['address']
 
@@ -91,20 +116,32 @@ def get_location_name(lat, lon):
             country = address.get('country', '')
 
             if city and country:
-                return f"{city}, {country}"
+                location_name = f"{city}, {country}"
             elif city:
-                return city
+                location_name = city
             elif country:
-                return country
+                location_name = country
 
-        return f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}, {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
+        if not location_name:
+            location_name = f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}, {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
+
+        if cache is not None:
+            cache[cache_key] = location_name
+
+        return location_name
 
     except (GeocoderTimedOut, GeocoderServiceError) as e:
         print(f"Geocoding error: {e}. Using coordinates instead.")
-        return f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}, {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
+        location_name = f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}, {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
+        if cache is not None:
+            cache[cache_key] = location_name
+        return location_name
     except Exception as e:
         print(f"Unexpected error in geocoding: {e}")
-        return f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}, {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
+        location_name = f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}, {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
+        if cache is not None:
+            cache[cache_key] = location_name
+        return location_name
 
 
 def cluster_locations(photos, threshold=0.01):
@@ -146,7 +183,7 @@ def get_image_date(exif_data):
     return None
 
 
-def create_pdf(clusters, output_path):
+def create_pdf(year_groups, output_path, geocache):
     doc = SimpleDocTemplate(output_path, pagesize=letter,
                           topMargin=0.5*inch, bottomMargin=0.5*inch,
                           leftMargin=0.5*inch, rightMargin=0.5*inch)
@@ -160,6 +197,16 @@ def create_pdf(clusters, output_path):
         fontSize=24,
         textColor='#2c3e50',
         spaceAfter=30,
+        alignment=TA_CENTER
+    )
+
+    year_style = ParagraphStyle(
+        'YearTitle',
+        parent=styles['Heading1'],
+        fontSize=20,
+        textColor='#1a252f',
+        spaceAfter=20,
+        spaceBefore=30,
         alignment=TA_CENTER
     )
 
@@ -180,18 +227,27 @@ def create_pdf(clusters, output_path):
         alignment=TA_CENTER
     )
 
-    story.append(Paragraph("Photo Album by Location", title_style))
+    story.append(Paragraph("Photo Album by Year and Location", title_style))
     story.append(Paragraph(f"Generated on {datetime.now().strftime('%B %d, %Y')}", styles['Normal']))
     story.append(Spacer(1, 0.3*inch))
 
-    for i, cluster in enumerate(clusters, 1):
-        lat, lon = cluster['center']
-        print(f"\nLooking up location for cluster {i}...")
-        location_name = get_location_name(lat, lon)
+    first_year = True
+    for year, clusters in sorted(year_groups.items()):
+        if not first_year:
+            story.append(PageBreak())
+        first_year = False
 
-        story.append(Paragraph(f"{location_name}", location_style))
-        story.append(Paragraph(f"{len(cluster['photos'])} photo(s)", styles['Normal']))
-        story.append(Spacer(1, 0.15*inch))
+        story.append(Paragraph(str(year), year_style))
+        story.append(Spacer(1, 0.2*inch))
+
+        for i, cluster in enumerate(clusters, 1):
+            lat, lon = cluster['center']
+            print(f"\nLooking up location for {year} cluster {i}...")
+            location_name = get_location_name(lat, lon, geocache)
+
+            story.append(Paragraph(f"{location_name}", location_style))
+            story.append(Paragraph(f"{len(cluster['photos'])} photo(s)", styles['Normal']))
+            story.append(Spacer(1, 0.15*inch))
 
         photos = cluster['photos']
         img_size = 2.3 * inch
@@ -242,15 +298,17 @@ def create_pdf(clusters, output_path):
             ]))
             story.append(table)
 
-        if i < len(clusters):
-            story.append(PageBreak())
+            if i < len(clusters):
+                story.append(Spacer(1, 0.3*inch))
 
     doc.build(story)
+    save_geocache(geocache)
     print(f"\nPDF created successfully: {output_path}")
 
 
 def process_images(input_path, output_path, threshold):
     photos = []
+    geocache = load_geocache()
 
     input_path = Path(input_path)
 
@@ -265,6 +323,7 @@ def process_images(input_path, output_path, threshold):
         return
 
     print(f"Found {len(image_files)} image(s) to process...")
+    print(f"Loaded {len(geocache)} cached location(s)")
 
     for image_path in image_files:
         exif_data = get_exif_data(str(image_path))
@@ -272,12 +331,17 @@ def process_images(input_path, output_path, threshold):
         coordinates = get_coordinates(gps_info)
 
         if coordinates:
+            photo_date = get_image_date(exif_data)
             photos.append({
                 'path': str(image_path),
                 'coordinates': coordinates,
-                'date': get_image_date(exif_data)
+                'date': photo_date,
+                'year': photo_date.year if photo_date else None
             })
-            print(f"✓ {image_path.name} - GPS: {get_location_name(*coordinates)}")
+            lat, lon = coordinates
+            cache_key = f"{lat:.4f},{lon:.4f}"
+            location_str = geocache.get(cache_key, f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}")
+            print(f"✓ {image_path.name} - GPS: {location_str}")
         else:
             print(f"✗ {image_path.name} - No GPS data found")
 
@@ -287,16 +351,24 @@ def process_images(input_path, output_path, threshold):
 
     print(f"\nProcessing {len(photos)} photo(s) with GPS data...")
 
-    clusters = cluster_locations(photos, threshold)
+    year_groups = defaultdict(list)
+    for photo in photos:
+        year = photo['year'] if photo['year'] else 'Unknown'
+        year_groups[year].append(photo)
 
-    clusters.sort(key=lambda c: len(c['photos']), reverse=True)
+    for year, year_photos in year_groups.items():
+        clusters = cluster_locations(year_photos, threshold)
+        clusters.sort(key=lambda c: len(c['photos']), reverse=True)
 
-    for cluster in clusters:
-        cluster['photos'].sort(key=lambda p: p['date'] if p['date'] else datetime.min)
+        for cluster in clusters:
+            cluster['photos'].sort(key=lambda p: p['date'] if p['date'] else datetime.min)
 
-    print(f"Grouped into {len(clusters)} location(s)")
+        year_groups[year] = clusters
 
-    create_pdf(clusters, output_path)
+    total_clusters = sum(len(clusters) for clusters in year_groups.values())
+    print(f"Grouped into {len(year_groups)} year(s) and {total_clusters} location(s)")
+
+    create_pdf(year_groups, output_path, geocache)
 
 
 def main():
