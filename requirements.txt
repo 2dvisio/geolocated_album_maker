@@ -1,3 +1,4 @@
 Pillow>=10.0.0
 reportlab>=4.0.0
 geopy>=2.4.0
+iptcinfo3>=2.1.0

@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
+from iptcinfo3 import IPTCInfo
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, PageBreak, Table, TableStyle
@@ -35,6 +36,30 @@ def get_exif_data(image_path):
         return exif
     except Exception as e:
         print(f"Error reading EXIF from {image_path}: {e}")
+        return None
+
+
+def get_iptc_people(image_path):
+    try:
+        iptc = IPTCInfo(image_path, force=True)
+        people = []
+
+        if hasattr(iptc, 'keywords') and iptc.keywords:
+            for keyword in iptc.keywords:
+                if isinstance(keyword, bytes):
+                    people.append(keyword.decode('utf-8', errors='ignore'))
+                else:
+                    people.append(str(keyword))
+
+        if hasattr(iptc, 'supplementalCategories') and iptc.supplementalCategories:
+            for cat in iptc.supplementalCategories:
+                if isinstance(cat, bytes):
+                    people.append(cat.decode('utf-8', errors='ignore'))
+                else:
+                    people.append(str(cat))
+
+        return people if people else None
+    except Exception as e:
         return None
 
 
@@ -267,9 +292,12 @@ def create_pdf(year_groups, output_path, geocache):
                         img.drawHeight = img_size
                         img.drawWidth = img_size * aspect
 
-                    caption_text = ""
+                    caption_parts = []
                     if photo['date']:
-                        caption_text = photo['date'].strftime('%b %d, %Y')
+                        caption_parts.append(photo['date'].strftime('%b %d, %Y'))
+                    if photo.get('people'):
+                        caption_parts.append(', '.join(photo['people'][:3]))
+                    caption_text = '<br/>'.join(caption_parts)
 
                     cell_content = [img, Paragraph(caption_text, caption_style)]
                     current_row.append(cell_content)
@@ -332,11 +360,13 @@ def process_images(input_path, output_path, threshold):
 
         if coordinates:
             photo_date = get_image_date(exif_data)
+            people = get_iptc_people(str(image_path))
             photos.append({
                 'path': str(image_path),
                 'coordinates': coordinates,
                 'date': photo_date,
-                'year': photo_date.year if photo_date else None
+                'year': photo_date.year if photo_date else None,
+                'people': people
             })
             lat, lon = coordinates
             cache_key = f"{lat:.4f},{lon:.4f}"
