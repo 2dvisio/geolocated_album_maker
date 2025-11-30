@@ -19,6 +19,7 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 import time
 import json
+import io
 
 
 def get_exif_data(image_path):
@@ -337,7 +338,27 @@ def create_pdf(year_groups, output_path, geocache, peoplecache):
 
             for idx, photo in enumerate(photos):
                 try:
-                    img = RLImage(photo['path'])
+                    # Open and resize the image to reduce PDF size
+                    pil_img = Image.open(photo['path'])
+
+                    # Calculate target size (max 800px on longest side)
+                    max_size = 800
+                    width, height = pil_img.size
+                    if width > max_size or height > max_size:
+                        if width > height:
+                            new_width = max_size
+                            new_height = int(height * (max_size / width))
+                        else:
+                            new_height = max_size
+                            new_width = int(width * (max_size / height))
+                        pil_img = pil_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+                    # Save to bytes buffer with compression
+                    img_buffer = io.BytesIO()
+                    pil_img.save(img_buffer, format='JPEG', quality=85, optimize=True)
+                    img_buffer.seek(0)
+
+                    img = RLImage(img_buffer)
                     aspect = img.imageWidth / img.imageHeight
 
                     if aspect > 1:
