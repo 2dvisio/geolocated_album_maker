@@ -296,7 +296,7 @@ def create_pdf(year_groups, output_path, geocache):
                     if photo['date']:
                         caption_parts.append(photo['date'].strftime('%b %d, %Y'))
                     if photo.get('people'):
-                        caption_parts.append(', '.join(photo['people'][:3]))
+                        caption_parts.append(', '.join(photo['people']))
                     caption_text = '<br/>'.join(caption_parts)
 
                     cell_content = [img, Paragraph(caption_text, caption_style)]
